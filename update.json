@@ -1,0 +1,40 @@
+{
+  "product": "NFXV2",
+  "version": "2.30",
+  "release_date": "2026-09-04",
+  "description": "Kịch bản test tự động: Tải 3 file, xóa 1 file và ghi đè file tạm",
+  "actions": [
+    {
+      "type": "DOWNLOAD",
+      "url": "https://raw.githubusercontent.com/quocnhanmmo/some-repo/main/note%20grid.txt",
+      "target_folder": "Files\\NFX\\",
+      "target_filename": "note_grid.txt",
+      "description": "1. Tải file note_grid.txt"
+    },
+    {
+      "type": "DOWNLOAD",
+      "url": "https://raw.githubusercontent.com/quocnhanmmo/some-repo/main/note%20grid.txt",
+      "target_folder": "Files\\NFX\\",
+      "target_filename": "note_grid_1.txt",
+      "description": "2. Tải file note_grid_1.txt"
+    },
+    {
+      "type": "DOWNLOAD",
+      "url": "https://raw.githubusercontent.com/quocnhanmmo/some-repo/main/note%20grid.txt",
+      "target_folder": "Files\\NFX\\",
+      "target_filename": "note_grid.txt.tmp",
+      "description": "3. Tải file tạm note_grid.txt.tmp"
+    },
+    {
+      "type": "DELETE_FILE",
+      "target_relative_path": "Files\\NFX\\note_grid_1.txt",
+      "description": "4. Thực hiện xóa file note_grid_1.txt"
+    },
+    {
+      "type": "OVERWRITE",
+      "source_relative_path": "Files\\NFX\\note_grid.txt.tmp",
+      "target_relative_path": "Files\\NFX\\note_grid.txt",
+      "description": "5. Ghi đè note_grid.txt.tmp thành note_grid.txt"
+    }
+  ]
+}
