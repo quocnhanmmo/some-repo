@@ -1,0 +1,208 @@
+// Giả định các enum này được định nghĩa trong một file dùng chung như NFX_Define.mqh
+enum ENUM_GRID_LOT_MODE
+{
+    GRID_LOT_DEU,
+    GRID_LOT_CONG,
+    GRID_LOT_FIBO,
+    GRID_LOT_NHAN
+};
+
+enum ENUM_GRID_DIST_MODE
+{
+    GRID_DIST_DEU,
+    GRID_DIST_CONG,
+    GRID_DIST_FIBO,
+    GRID_DIST_NHAN
+};
+
+//+------------------------------------------------------------------+
+//| Lớp CAction chứa các hành động giao dịch cấp cao                  |
+//+------------------------------------------------------------------+
+class CAction
+{
+private:
+    static void CalculateGridArrays(
+        const int count,
+        double &array_lot[],
+        double &array_dist[],
+        const ENUM_GRID_LOT_MODE lot_mode,
+        const double base_lot,
+        const double factor_lot,
+        const ENUM_GRID_DIST_MODE dist_mode,
+        const double base_dist_pips,
+        const double factor_dist
+    );
+
+public:
+    bool PlaceOrderGrid(
+        const string symbol,
+        ENUM_ORDER_TYPE pending_order_type,
+        const ulong base_magic,
+        const int count,
+        const double initial_anchor_price,
+        const bool execute_first_as_market,
+        const ENUM_GRID_LOT_MODE lot_mode,
+        const double base_lot,
+        const double factor_lot,
+        const ENUM_GRID_DIST_MODE dist_mode,
+        const double base_dist_pips,
+        const double factor_dist,
+        const string comment = "NFX_Grid"
+    );
+};
+//+------------------------------------------------------------------+
+//| Hàm tính toán lưới (private)                                     |
+//+------------------------------------------------------------------+
+void CAction::CalculateGridArrays(
+    const int count,
+    double &array_lot[],
+    double &array_dist[],
+    const ENUM_GRID_LOT_MODE lot_mode,
+    const double base_lot,
+    const double factor_lot,
+    const ENUM_GRID_DIST_MODE dist_mode,
+    const double base_dist_pips,
+    const double factor_dist
+)
+{
+    if(count <= 0) { ArrayResize(array_lot, 0); ArrayResize(array_dist, 0); return; }
+
+    ArrayResize(array_lot, count);
+    ArrayResize(array_dist, count);
+
+    long fib_a = 1, fib_b = 2;
+
+    for(int i = 0; i < count; i++)
+    {
+        // 1. TÍNH MẢNG DIST
+        if(i == 0)      { array_dist[i] = 0; }
+        else if(i == 1) { array_dist[i] = base_dist_pips; }
+        else
+        {
+            if(dist_mode == GRID_DIST_DEU)        { array_dist[i] = array_dist[i-1] + base_dist_pips; }
+            else if(dist_mode == GRID_DIST_CONG)  { array_dist[i] = array_dist[i-1] + factor_dist; }
+            else if(dist_mode == GRID_DIST_NHAN)  { array_dist[i] = array_dist[i-1] * factor_dist; }
+            else if(dist_mode == GRID_DIST_FIBO)
+            {
+                array_dist[i] = array_dist[i-1] + (base_dist_pips * fib_a);
+                long next_fib = fib_a + fib_b;
+                fib_a = fib_b;
+                fib_b = next_fib;
+            }
+        }
+
+        // 2. TÍNH MẢNG LOT
+        if(i == 0) { array_lot[i] = base_lot; }
+        else if(i == 1)
+        {
+            if(lot_mode == GRID_LOT_FIBO || lot_mode == GRID_LOT_DEU) { array_lot[i] = base_lot; }
+            else if(lot_mode == GRID_LOT_CONG) { array_lot[i] = array_lot[i-1] + factor_lot; }
+            else if(lot_mode == GRID_LOT_NHAN) { array_lot[i] = array_lot[i-1] * factor_lot; }
+        }
+        else
+        {
+            if(lot_mode == GRID_LOT_DEU)       { array_lot[i] = base_lot; }
+            else if(lot_mode == GRID_LOT_CONG) { array_lot[i] = array_lot[i-1] + factor_lot; }
+            else if(lot_mode == GRID_LOT_NHAN) { array_lot[i] = array_lot[i-1] * factor_lot; }
+            else if(lot_mode == GRID_LOT_FIBO) { array_lot[i] = array_lot[i-1] + array_lot[i-2]; }
+        }
+    }
+}
+//+------------------------------------------------------------------+
+//| Hàm đặt lưới lệnh chính (public)                                |
+//+------------------------------------------------------------------+
+bool CAction::PlaceOrderGrid(
+    const string symbol,
+    ENUM_ORDER_TYPE pending_order_type,
+    const ulong base_magic,
+    const int count,
+    const double initial_anchor_price,
+    const bool execute_first_as_market,
+    const ENUM_GRID_LOT_MODE lot_mode,
+    const double base_lot,
+    const double factor_lot,
+    const ENUM_GRID_DIST_MODE dist_mode,
+    const double base_dist_pips,
+    const double factor_dist,
+    const string comment
+)
+{
+    if(count <= 0) { printf("PlaceOrderGrid Error: Số lượng lệnh phải lớn hơn 0."); return false; }
+
+    // --- 1. Chuẩn bị mảng và các thông số ---
+    double array_lot[];
+    double array_dist[];
+    CalculateGridArrays(count, array_lot, array_dist, lot_mode, base_lot, factor_lot, dist_mode, base_dist_pips, factor_dist);
+
+    const double pip_value = SymbolInfoDouble(symbol, SYMBOL_PIP);
+    const int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+    if(pip_value == 0) { printf("PlaceOrderGrid Error: Không thể lấy giá trị PIP cho symbol %s.", symbol); return false; }
+
+    double final_anchor_price = initial_anchor_price;
+    MqlTradeRequest request = {0};
+    MqlTradeResult  result  = {0};
+    
+    // --- 2. Xử lý lệnh đầu tiên (Market hoặc Pending) ---
+    request.symbol  = symbol;
+    request.magic   = base_magic; // Lệnh đầu tiên có magic = base_magic
+    request.comment = comment;
+    request.volume  = NormalizeDouble(array_lot[0], 2);
+    
+    if(execute_first_as_market)
+    {
+        ENUM_ORDER_TYPE market_order_type = (pending_order_type == OP_BUYLIMIT || pending_order_type == OP_BUYSTOP) ? OP_BUY : OP_SELL;
+        request.action = TRADE_ACTION_DEAL;
+        request.type   = market_order_type;
+        request.price  = (market_order_type == OP_BUY) ? SymbolInfoDouble(symbol, SYMBOL_ASK) : SymbolInfoDouble(symbol, SYMBOL_BID);
+        
+        if(!OrderSend(request, result) || result.retcode != TRADE_RETCODE_DONE)
+        {
+            printf("PlaceOrderGrid: Lệnh market đầu tiên thất bại. Retcode: %u", result.retcode);
+            return false;
+        }
+        final_anchor_price = result.price; // Lấy giá khớp lệnh thực tế làm giá gốc mới
+    }
+    else
+    {
+        request.action    = TRADE_ACTION_PENDING;
+        request.type      = pending_order_type;
+        request.price     = NormalizeDouble(initial_anchor_price, digits);
+        request.type_time = ORDER_TIME_GTC;
+
+        if(!OrderSend(request, result) || result.retcode != TRADE_RETCODE_DONE)
+        {
+            printf("PlaceOrderGrid: Lệnh pending đầu tiên thất bại. Retcode: %u", result.retcode);
+            return false;
+        }
+    }
+
+    // --- 3. Đặt các lệnh pending còn lại trong lưới ---
+    const int price_direction = (pending_order_type == OP_BUYLIMIT || pending_order_type == OP_SELLSTOP) ? -1 : 1;
+    bool all_success = true;
+
+    for(int i = 1; i < count; i++) // Bắt đầu từ 1 vì lệnh 0 đã được xử lý
+    {
+        MqlTradeRequest pending_request = {0};
+        MqlTradeResult  pending_result  = {0};
+
+        pending_request.action    = TRADE_ACTION_PENDING;
+        pending_request.symbol    = symbol;
+        pending_request.magic     = base_magic + i;
+        pending_request.comment   = comment;
+        pending_request.type_time = ORDER_TIME_GTC;
+        pending_request.type      = pending_order_type;
+        pending_request.volume    = NormalizeDouble(array_lot[i], 2);
+        
+        const double price_offset = array_dist[i] * pip_value;
+        pending_request.price = NormalizeDouble(final_anchor_price + (price_offset * price_direction), digits);
+
+        if(!OrderSend(pending_request, pending_result))
+        {
+            printf("PlaceOrderGrid: Lệnh pending #%d thất bại. Lỗi: %u", i, GetLastError());
+            all_success = false;
+        }
+    }
+    
+    return all_success;
+}
+//+------------------------------------------------------------------+
